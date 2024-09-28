@@ -1,5 +1,8 @@
 from dotenv import load_dotenv
 import chainlit as cl
+import json
+from prompts import SYSTEM_PROMPT
+from movie_functions import get_now_playing_movies, get_showtimes, get_reviews
 
 load_dotenv()
 
@@ -19,10 +22,6 @@ gen_kwargs = {
     "max_tokens": 500
 }
 
-SYSTEM_PROMPT = """\
-You are a pirate.
-"""
-
 @observe
 @cl.on_chat_start
 def on_chat_start():    
@@ -34,14 +33,31 @@ async def generate_response(client, message_history, gen_kwargs):
     response_message = cl.Message(content="")
     await response_message.send()
 
-    stream = await client.chat.completions.create(messages=message_history, stream=True, **gen_kwargs)
+    stream = await client.chat.completions.create(
+        messages=message_history, 
+        stream=True, 
+        **gen_kwargs)
+    
+    full_response = ""
+    is_function_call = False
+    function_call_data = {}
+    
     async for part in stream:
         if token := part.choices[0].delta.content or "":
             await response_message.stream_token(token)
-    
-    await response_message.update()
+            full_response += token
 
-    return response_message
+        # Check if the response is a function call
+    try:
+        response_json = json.loads(full_response)
+        if "function_call" in response_json:
+            is_function_call = True
+            function_call_data = response_json["function_call"]
+    except json.JSONDecodeError:
+        pass
+
+    await response_message.update()
+    return response_message, full_response, message_history, is_function_call, function_call_data
 
 @cl.on_message
 @observe
@@ -49,8 +65,30 @@ async def on_message(message: cl.Message):
     message_history = cl.user_session.get("message_history", [])
     message_history.append({"role": "user", "content": message.content})
     
-    response_message = await generate_response(client, message_history, gen_kwargs)
+    response_message, full_response, updated_message_history, is_function_call, function_call_data = await generate_response(client, message_history, gen_kwargs)
+    if is_function_call:
+        function_name = function_call_data["name"]
+        function_args = function_call_data["arguments"]
+        
+        if function_name == "get_now_playing_movies":
+            result = get_now_playing_movies()
+        elif function_name == "get_showtimes":
+            result = get_showtimes(**function_args)
+        elif function_name == "get_reviews":
+            result = get_reviews(**function_args)
+        else:
+            result = "Unknown function"
 
+        system_message = {
+            "role": "system",
+            "content": f"Function '{function_name}' was called with arguments {function_args}. The result is:\n{json.dumps(result, indent=2)}"
+        }
+        updated_message_history.append(system_message)
+        
+        # Generate a new response based on the function result
+        response_message, full_response, updated_message_history, _, _ = await generate_response(client, updated_message_history, gen_kwargs)
+
+    message_history = updated_message_history
     message_history.append({"role": "assistant", "content": response_message.content})
     cl.user_session.set("message_history", message_history)
 
