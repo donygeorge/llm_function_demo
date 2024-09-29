@@ -44,3 +44,19 @@ Only use these functions when the user's query specifically relates to their pur
 
 Always maintain a friendly and helpful tone. If you're unsure about any movie-related information, it's okay to say you don't know and suggest checking official sources.
 """
+
+RAG_PROMPT = """\
+Based on the conversation, determine if the topic is about a specific movie. Determine if the user is asking a question that would be aided by knowing what critics are saying about the movie. Determine if the reviews for that movie have already been provided in the conversation. If so, do not fetch reviews.
+
+Your only role is to evaluate the conversation, and decide whether to fetch reviews.
+
+Output the current movie, id, a boolean to fetch reviews in JSON format, and your
+rationale. Do not output as a code block.
+
+{
+    "movie": "title",
+    "id": 123,
+    "fetch_reviews": true
+    "rationale": "reasoning"
+}
+"""

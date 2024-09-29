@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 import chainlit as cl
 import json
 import random
-from prompts import SYSTEM_PROMPT
+from prompts import SYSTEM_PROMPT, RAG_PROMPT
 from movie_functions import get_now_playing_movies, get_showtimes, get_reviews, buy_ticket
 
 load_dotenv()
@@ -60,11 +60,39 @@ async def generate_response(client, message_history, gen_kwargs):
     await response_message.update()
     return response_message, full_response, message_history, is_function_call, function_call_data
 
+@observe
+async def check_for_reviews(client, message_history, gen_kwargs):
+    updated_message_history = message_history.copy()
+    if updated_message_history and updated_message_history[0]["role"] == "system":
+        # Replace the existing system message
+        updated_message_history[0] = {"role": "system", "content": RAG_PROMPT}
+    else:
+        # Insert a new system message at the beginning
+        updated_message_history.insert(0, {"role": "system", "content": RAG_PROMPT})
+
+    response = await client.chat.completions.create(messages=updated_message_history, **gen_kwargs)
+    try:
+        response_json = json.loads(response.choices[0].message.content)
+        print("Checking for reviews: " + str(response_json))
+        if response_json.get("fetch_reviews", False):
+            movie_id = response_json.get("id")
+            reviews = get_reviews(movie_id)
+            reviews_string = f"Reviews for {response_json.get('movie')} (ID: {movie_id}):\n\n{reviews}"
+            context_message = {"role": "system", "content": f"CONTEXT: {reviews_string}"}
+            message_history.append(context_message)
+            return message_history
+    except json.JSONDecodeError:
+        pass
+
+    return message_history
+
+
 @cl.on_message
 @observe
 async def on_message(message: cl.Message):
     message_history = cl.user_session.get("message_history", [])
     message_history.append({"role": "user", "content": message.content})
+    message_history = await check_for_reviews(client, message_history, gen_kwargs)
     
     while True:
         response_message, full_response, updated_message_history, is_function_call, function_call_data = await generate_response(client, message_history, gen_kwargs)
