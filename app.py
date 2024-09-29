@@ -3,7 +3,7 @@ import chainlit as cl
 import json
 import random
 from prompts import SYSTEM_PROMPT
-from movie_functions import get_now_playing_movies, get_showtimes, get_reviews
+from movie_functions import get_now_playing_movies, get_showtimes, get_reviews, buy_ticket
 
 load_dotenv()
 
@@ -82,7 +82,9 @@ async def on_message(message: cl.Message):
         elif function_name == "get_showtimes":
             result = get_showtimes(**function_args)
         elif function_name == "get_reviews":
-            result = get_reviews(**function_args)
+            result = get_reviews(**function_args)            
+        elif function_name == "buy_ticket":
+            result = await buy_ticket(**function_args)
         else:
             result = "Unknown function"
 

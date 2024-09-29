@@ -2,6 +2,8 @@ import os
 import requests
 from serpapi import GoogleSearch
 import os
+import chainlit as cl
+
 
 def get_now_playing_movies():
     url = "https://api.themoviedb.org/3/movie/now_playing?language=en-US&page=1"
@@ -72,8 +74,23 @@ def get_showtimes(title, location):
 
     return formatted_showtimes
 
-def buy_ticket(theater, movie, showtime):
-    return f"Ticket purchased for {movie} at {theater} for {showtime}."
+async def buy_ticket(theater: str, movie: str, showtime: str) -> str:
+    print("Buying ticket for: ", movie, theater, showtime)
+    # First, display the ticket details to the user
+    confirmation_message = f"You are about to purchase a ticket for:\nMovie: {movie}\nTheater: {theater}\nShowtime: {showtime}\n\nDo you want to confirm this purchase? (Yes/No)"
+    
+    confirmation = await cl.AskUserMessage(content=confirmation_message, timeout=60).send()
+    print("Confirmation: ", confirmation.get('output', ''))
+    
+    if confirmation and 'yes' in confirmation.get('output', '').lower():
+        # Here you would typically interact with a ticket booking API or database
+        # For this example, we'll just return a success message
+        response = f"Ticket purchased successfully for {movie} at {theater} for {showtime}."
+    else:
+        response = f"Ticket purchase cancelled. Let me know if you want to make any changes or try again."
+
+    print("Response: ", response)
+    return response
 
 def get_reviews(movie_id):
     url = f"https://api.themoviedb.org/3/movie/{movie_id}/reviews?language=en-US&page=1"
