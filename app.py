@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 import chainlit as cl
 import json
 import random
-from prompts import SYSTEM_PROMPT, RAG_PROMPT
+from prompts import SYSTEM_PROMPT_TOOLS, RAG_PROMPT, tools
 from movie_functions import get_now_playing_movies, get_showtimes, get_reviews, buy_ticket
 
 load_dotenv()
@@ -26,7 +26,7 @@ gen_kwargs = {
 @observe
 @cl.on_chat_start
 def on_chat_start():    
-    message_history = [{"role": "system", "content": SYSTEM_PROMPT}]
+    message_history = [{"role": "system", "content": SYSTEM_PROMPT_TOOLS}]
     cl.user_session.set("message_history", message_history)
 
 @observe
@@ -36,29 +36,50 @@ async def generate_response(client, message_history, gen_kwargs):
 
     stream = await client.chat.completions.create(
         messages=message_history, 
+        tools=tools,
+        tool_choice="auto",
         stream=True, 
         **gen_kwargs)
     
     full_response = ""
-    is_function_call = False
-    function_call_data = {}
+    is_tool_call = False
+    tool_calls = []
+    current_tool_call_index = None
+    current_tool_call = None
     
     async for part in stream:
-        if token := part.choices[0].delta.content or "":
-            await response_message.stream_token(token)
-            full_response += token
+        delta = part.choices[0].delta
+        
+        if delta.content:
+            await response_message.stream_token(delta.content)
+            full_response += delta.content
 
-        # Check if the response is a function call
-    try:
-        response_json = json.loads(full_response)
-        if "function_call" in response_json:
-            is_function_call = True
-            function_call_data = response_json["function_call"]
-    except json.JSONDecodeError:
-        pass
+        if delta.tool_calls:
+            is_tool_call = True
+            # print("Tool calls: " + str(delta.tool_calls))
+            for tool_call in delta.tool_calls:
+                if tool_call.index is not current_tool_call_index:  # A new tool call is starting
+                    if current_tool_call:
+                        tool_calls.append(current_tool_call)
+                    current_tool_call = {
+                        "name": tool_call.function.name,
+                        "arguments": tool_call.function.arguments or ""
+                    }
+                    current_tool_call_index = tool_call.index
+                else:
+                    if tool_call.function and tool_call.function.arguments:
+                        current_tool_call["arguments"] += tool_call.function.arguments
+                    elif tool_call.function and tool_call.function.name:
+                        current_tool_call["names"] += tool_call.function.name
+
+    if current_tool_call:
+        tool_calls.append(current_tool_call)
+
+    print("Tool calls: " + str(tool_calls))
 
     await response_message.update()
-    return response_message, full_response, message_history, is_function_call, function_call_data
+
+    return response_message, full_response, message_history, is_tool_call, tool_calls
 
 @observe
 async def check_for_reviews(client, message_history, gen_kwargs):
@@ -95,32 +116,42 @@ async def on_message(message: cl.Message):
     message_history = await check_for_reviews(client, message_history, gen_kwargs)
     
     while True:
-        response_message, full_response, updated_message_history, is_function_call, function_call_data = await generate_response(client, message_history, gen_kwargs)
+        response_message, full_response, updated_message_history, is_tool_call, tool_call_data = await generate_response(client, message_history, gen_kwargs)
 
-        if not is_function_call:
-            break
-
-        function_name = function_call_data["name"]
-        function_args = function_call_data["arguments"]
+        print("Is tool call: " + str(is_tool_call))
+        print("Tool call data: " + str(tool_call_data))
         
-        print(f"Function name: {function_name}")
-        print(f"Function args: {function_args}")
-        if function_name == "get_now_playing_movies":
-            result = get_now_playing_movies()
-        elif function_name == "get_showtimes":
-            result = get_showtimes(**function_args)
-        elif function_name == "get_reviews":
-            result = get_reviews(**function_args)            
-        elif function_name == "buy_ticket":
-            result = await buy_ticket(**function_args)
-        else:
-            result = "Unknown function"
+        if not is_tool_call:
+            break
+        
+        for tool_call in tool_call_data:
+            print("Tool call: " + str(tool_call))            
+            function_name = tool_call["name"]
+            function_args = json.loads(tool_call["arguments"])
+            
+            if function_name is None:
+                continue
+            
+            print("Function name: " + function_name)
+            print("Function args: " + str(function_args))
+            
+            
+            if function_name == "get_now_playing_movies":
+                result = get_now_playing_movies()
+            elif function_name == "get_showtimes":
+                result = get_showtimes(**function_args)
+            elif function_name == "get_reviews":
+                result = get_reviews(**function_args)
+            elif function_name == "buy_ticket":
+                result = await buy_ticket(**function_args)
+            else:
+                result = "Unknown function"
 
-        system_message = {
-            "role": "system",
-            "content": f"Function '{function_name}' was called with arguments {function_args}. The result is:\n{json.dumps(result, indent=2)}"
-        }
-        updated_message_history.append(system_message)
+            system_message = {
+                "role": "system",
+                "content": f"Function '{function_name}' was called with arguments {function_args}. The result is:\n{result}"
+            }
+            updated_message_history.append(system_message)
         
         # If the function was get_now_playing_movies and we need to pick a random movie
         if function_name == "get_now_playing_movies" and "random" in message.content.lower():
