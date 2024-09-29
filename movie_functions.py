@@ -33,6 +33,7 @@ def get_now_playing_movies():
             f"**Overview:** {overview}\n\n"
         )
 
+    # return "Getting List of movies ran into an error"
     return formatted_movies
 
 def get_showtimes(title, location):

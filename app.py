@@ -1,6 +1,7 @@
 from dotenv import load_dotenv
 import chainlit as cl
 import json
+import random
 from prompts import SYSTEM_PROMPT
 from movie_functions import get_now_playing_movies, get_showtimes, get_reviews
 
@@ -65,11 +66,17 @@ async def on_message(message: cl.Message):
     message_history = cl.user_session.get("message_history", [])
     message_history.append({"role": "user", "content": message.content})
     
-    response_message, full_response, updated_message_history, is_function_call, function_call_data = await generate_response(client, message_history, gen_kwargs)
-    if is_function_call:
+    while True:
+        response_message, full_response, updated_message_history, is_function_call, function_call_data = await generate_response(client, message_history, gen_kwargs)
+
+        if not is_function_call:
+            break
+
         function_name = function_call_data["name"]
         function_args = function_call_data["arguments"]
         
+        print(f"Function name: {function_name}")
+        print(f"Function args: {function_args}")
         if function_name == "get_now_playing_movies":
             result = get_now_playing_movies()
         elif function_name == "get_showtimes":
@@ -85,12 +92,22 @@ async def on_message(message: cl.Message):
         }
         updated_message_history.append(system_message)
         
-        # Generate a new response based on the function result
-        response_message, full_response, updated_message_history, _, _ = await generate_response(client, updated_message_history, gen_kwargs)
-
-    message_history = updated_message_history
+        # If the function was get_now_playing_movies and we need to pick a random movie
+        if function_name == "get_now_playing_movies" and "random" in message.content.lower():
+            random_item = random.randint(1, 5)
+            print("Random item:" + str(random_item))
+            system_message = {
+                "role": "system",
+                "content": f"User asked for a random movie, so we chose movie at position {random_item}. If the total list of movies is less than {random_item}, chose the last movie in the list."
+            }
+            updated_message_history.append(system_message)
+        
+        message_history = updated_message_history
+    
     message_history.append({"role": "assistant", "content": response_message.content})
     cl.user_session.set("message_history", message_history)
+
+
 
 if __name__ == "__main__":
     cl.main()
